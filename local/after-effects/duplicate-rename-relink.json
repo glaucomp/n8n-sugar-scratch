@@ -1,0 +1,170 @@
+{
+  "name": "Duplicate, rename, and relink After Effects footage",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Relink After Effects footage",
+        "formDescription": "Copies a folder, renames files, and opens the After Effects project. Quit After Effects before you run this form.",
+        "responseMode": "lastNode",
+        "authentication": "none",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Source folder",
+              "fieldName": "sourceFolder",
+              "fieldType": "text",
+              "placeholder": "/Users/you/templates/client-template",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Destination folder",
+              "fieldName": "destinationFolder",
+              "fieldType": "text",
+              "placeholder": "/Users/you/jobs/acme-2026",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Text to find in file names",
+              "fieldName": "fileNameFind",
+              "fieldType": "text",
+              "placeholder": "TEMPLATE",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Replacement text",
+              "fieldName": "fileNameReplace",
+              "fieldType": "text",
+              "placeholder": "ACME",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Project file name",
+              "fieldName": "projectFileName",
+              "fieldType": "text",
+              "placeholder": "template.aep",
+              "defaultValue": "template.aep",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "After Effects binary",
+              "fieldName": "afterEffectsBinary",
+              "fieldType": "text",
+              "placeholder": "/Applications/Adobe After Effects 2025/Adobe After Effects 2025.app/Contents/MacOS/After Effects",
+              "defaultValue": "/Applications/Adobe After Effects 2025/Adobe After Effects 2025.app/Contents/MacOS/After Effects",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {
+          "buttonLabel": "Run",
+          "appendAttribution": false,
+          "respondWithOptions": {
+            "values": {
+              "respondWith": "text",
+              "formSubmittedText": "The folder is copied. After Effects is opening the project. The project stays open."
+            }
+          }
+        }
+      },
+      "id": "c4a1e8b2-6d47-4f93-8a15-0e7b9c2d4f11",
+      "name": "On form submission",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "7c2a9e14b6d84f0aa1e3c5d7b9f24680"
+    },
+    {
+      "parameters": {
+        "executeOnce": true,
+        "command": "={{(() => {\n  const q = (value) => \"'\" + String(value ?? \"\").replace(/'/g, \"'\\\\''\") + \"'\";\n  const clean = (value) => {\n    const text = String(value ?? \"\").trim().replace(/\\/+$/, \"\");\n    return text || \"/\";\n  };\n  const form = $(\"On form submission\").item.json;\n\n  const src = q(clean(form.sourceFolder));\n  const dest = q(clean(form.destinationFolder));\n  return [\n    \"bash <<'BASH'\",\n    \"set -euo pipefail\",\n    \"if ! command -v ditto >/dev/null 2>&1; then\",\n    \"  echo \\\"ditto is not available. This workflow runs on macOS.\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"src=\" + src,\n    \"dest=\" + dest,\n    \"if [ ! -d \\\"$src\\\" ]; then\",\n    \"  echo \\\"Source folder does not exist: $src\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"if [ -e \\\"$dest\\\" ]; then\",\n    \"  echo \\\"Destination already exists: $dest\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"src_real=$(cd \\\"$src\\\" && pwd -P)\",\n    \"mkdir -p \\\"$(dirname \\\"$dest\\\")\\\"\",\n    \"dest_parent_real=$(cd \\\"$(dirname \\\"$dest\\\")\\\" && pwd -P)\",\n    \"dest_real=\\\"$dest_parent_real/$(basename \\\"$dest\\\")\\\"\",\n    \"if [ \\\"$src_real\\\" = \\\"$dest_real\\\" ]; then\",\n    \"  echo \\\"Source and destination are the same folder\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"case \\\"$dest_real/\\\" in\",\n    \"  \\\"$src_real/\\\"*) echo \\\"Destination is inside the source folder\\\" >&2; exit 1 ;;\",\n    \"esac\",\n    \"case \\\"$src_real/\\\" in\",\n    \"  \\\"$dest_real/\\\"*) echo \\\"Source is inside the destination folder\\\" >&2; exit 1 ;;\",\n    \"esac\",\n    \"ditto \\\"$src_real\\\" \\\"$dest_real\\\"\",\n    \"echo \\\"Copied $src_real to $dest_real\\\"\",\n    \"BASH\",\n  ].join(\"\\n\");\n})()}}"
+      },
+      "id": "c4a1e8b2-6d47-4f93-8a15-0e7b9c2d4f12",
+      "name": "Copy folder",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        320,
+        300
+      ],
+      "notes": "Stops when the destination folder already exists.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "executeOnce": true,
+        "command": "={{(() => {\n  const q = (value) => \"'\" + String(value ?? \"\").replace(/'/g, \"'\\\\''\") + \"'\";\n  const clean = (value) => {\n    const text = String(value ?? \"\").trim().replace(/\\/+$/, \"\");\n    return text || \"/\";\n  };\n  const form = $(\"On form submission\").item.json;\n\n  const src = q(clean(form.sourceFolder));\n  const dest = q(clean(form.destinationFolder));\n  const findText = q(String(form.fileNameFind ?? \"\"));\n  const replText = q(String(form.fileNameReplace ?? \"\"));\n  const projectName = q(String(form.projectFileName ?? \"\").trim());\n  const script = [\"import json\",\"import os\",\"import sys\",\"\",\"# Move every renamed file to a temporary name first so two files can swap names.\",\"\",\"source = os.path.realpath(sys.argv[1])\",\"dest = os.path.realpath(sys.argv[2])\",\"find = sys.argv[3]\",\"repl = sys.argv[4]\",\"project_name = sys.argv[5].replace(\\\"\\\\\\\\\\\", \\\"/\\\").strip()\",\"while project_name.startswith(\\\"./\\\"):\",\"    project_name = project_name[2:]\",\"\",\"if not os.path.isdir(source):\",\"    sys.exit(\\\"Source folder does not exist: \\\" + source)\",\"if not os.path.isdir(dest):\",\"    sys.exit(\\\"Destination folder does not exist: \\\" + dest)\",\"if not project_name or project_name.startswith(\\\"/\\\") or project_name.startswith(\\\"~\\\"):\",\"    sys.exit(\\\"Project file name must be a file name or a relative path inside the destination folder\\\")\",\"if any(part in (\\\"\\\", \\\".\\\", \\\"..\\\") for part in project_name.split(\\\"/\\\")):\",\"    sys.exit(\\\"Project file name must be a file name or a relative path inside the destination folder\\\")\",\"\",\"records = []\",\"for root, dir_names, file_names in os.walk(dest):\",\"    dir_names.sort()\",\"    for file_name in sorted(file_names):\",\"        old_absolute = os.path.join(root, file_name)\",\"        if not os.path.isfile(old_absolute):\",\"            continue\",\"        old_relative = os.path.relpath(old_absolute, dest).replace(\\\"\\\\\\\\\\\", \\\"/\\\")\",\"        parent = os.path.dirname(old_relative)\",\"        new_name = file_name\",\"        if find and find in file_name:\",\"            new_name = file_name.replace(find, repl)\",\"        if new_name in (\\\"\\\", \\\".\\\", \\\"..\\\") or \\\"/\\\" in new_name or \\\"\\\\0\\\" in new_name:\",\"            sys.exit(\\\"Refusing unsafe file name: \\\" + new_name)\",\"        if new_name == file_name:\",\"            new_relative = old_relative\",\"        elif parent:\",\"            new_relative = parent + \\\"/\\\" + new_name\",\"        else:\",\"            new_relative = new_name\",\"        records.append(\",\"            {\",\"                \\\"oldBasename\\\": file_name,\",\"                \\\"oldRelative\\\": old_relative,\",\"                \\\"oldAbsolute\\\": old_absolute,\",\"                \\\"sourceAbsolute\\\": os.path.normpath(os.path.join(source, old_relative)),\",\"                \\\"newRelative\\\": new_relative,\",\"                \\\"newName\\\": new_name,\",\"            }\",\"        )\",\"\",\"folded = [record[\\\"newRelative\\\"].lower() for record in records]\",\"if len(folded) != len(set(folded)):\",\"    sys.exit(\\\"Two files would get the same name. Change the find and replace text.\\\")\",\"\",\"moved = []\",\"completed = []\",\"try:\",\"    for index, record in enumerate(records):\",\"        if record[\\\"newRelative\\\"] == record[\\\"oldRelative\\\"]:\",\"            record[\\\"newAbsolute\\\"] = record[\\\"oldAbsolute\\\"]\",\"            continue\",\"        temporary = record[\\\"oldAbsolute\\\"] + \\\".ae-relink-tmp-\\\" + str(index)\",\"        if os.path.exists(temporary):\",\"            raise RuntimeError(\\\"Temporary name already exists: \\\" + temporary)\",\"        os.rename(record[\\\"oldAbsolute\\\"], temporary)\",\"        record[\\\"temporary\\\"] = temporary\",\"        moved.append(record)\",\"    for record in moved:\",\"        new_absolute = os.path.join(dest, record[\\\"newRelative\\\"])\",\"        if os.path.exists(new_absolute):\",\"            raise RuntimeError(\\\"Target already exists: \\\" + new_absolute)\",\"        os.rename(record[\\\"temporary\\\"], new_absolute)\",\"        record[\\\"newAbsolute\\\"] = new_absolute\",\"        del record[\\\"temporary\\\"]\",\"        completed.append(record)\",\"except Exception as error:\",\"    for record in completed:\",\"        if os.path.exists(record[\\\"newAbsolute\\\"]) and not os.path.exists(record[\\\"oldAbsolute\\\"]):\",\"            os.rename(record[\\\"newAbsolute\\\"], record[\\\"oldAbsolute\\\"])\",\"    for record in moved:\",\"        temporary = record.get(\\\"temporary\\\")\",\"        if temporary and os.path.exists(temporary) and not os.path.exists(record[\\\"oldAbsolute\\\"]):\",\"            os.rename(temporary, record[\\\"oldAbsolute\\\"])\",\"    sys.exit(\\\"Rename failed: \\\" + str(error))\",\"\",\"relative_matches = [record for record in records if record[\\\"oldRelative\\\"] == project_name]\",\"if relative_matches:\",\"    matches = relative_matches\",\"else:\",\"    matches = [record for record in records if record[\\\"oldBasename\\\"] == project_name]\",\"if len(matches) != 1:\",\"    aep_files = [\",\"        record[\\\"oldRelative\\\"]\",\"        for record in records\",\"        if record[\\\"oldBasename\\\"].lower().endswith(\\\".aep\\\")\",\"    ]\",\"    listed = \\\", \\\".join(aep_files) if aep_files else \\\"(none)\\\"\",\"    if len(matches) == 0:\",\"        sys.exit(\\\"Project file not found: \\\" + project_name + \\\". AEP files: \\\" + listed)\",\"    found = \\\", \\\".join(record[\\\"oldRelative\\\"] for record in matches)\",\"    sys.exit(\\\"Project file name matches more than one file: \\\" + found)\",\"\",\"project = matches[0]\",\"footage = []\",\"for record in records:\",\"    if record is project:\",\"        continue\",\"    footage.append(\",\"        {\",\"            \\\"oldBasename\\\": record[\\\"oldBasename\\\"],\",\"            \\\"oldRelative\\\": record[\\\"oldRelative\\\"],\",\"            \\\"oldAbsolute\\\": record[\\\"oldAbsolute\\\"],\",\"            \\\"sourceAbsolute\\\": record[\\\"sourceAbsolute\\\"],\",\"            \\\"newAbsolute\\\": record[\\\"newAbsolute\\\"],\",\"        }\",\"    )\",\"renamed = [\",\"    {\\\"from\\\": record[\\\"oldRelative\\\"], \\\"to\\\": record[\\\"newRelative\\\"]}\",\"    for record in records\",\"    if record[\\\"oldRelative\\\"] != record[\\\"newRelative\\\"]\",\"]\",\"\",\"report = {\",\"    \\\"projectPath\\\": project[\\\"newAbsolute\\\"],\",\"    \\\"renamed\\\": renamed,\",\"    \\\"files\\\": footage,\",\"}\",\"report_path = os.path.join(dest, \\\"ae-relink-report.json\\\")\",\"jsx_path = os.path.join(dest, \\\"ae-relink.jsx\\\")\",\"\",\"\",\"def js(value):\",\"    return json.dumps(value, ensure_ascii=True)\",\"\",\"\",\"jsx = \\\"\\\"\\\"(function () {\",\"  // Relink copied footage after file names change. Leave After Effects open.\",\"  var projectPath = __PROJECT_PATH__;\",\"  var files = __FILES__;\",\"  var lineBreak = String.fromCharCode(10);\",\"\",\"  function normalize(value) {\",\"    var text = String(value).toLowerCase();\",\"    while (text.length > 1 && text.charAt(text.length - 1) === \\\"/\\\") {\",\"      text = text.substring(0, text.length - 1);\",\"    }\",\"    return text;\",\"  }\",\"\",\"  function samePath(left, right) {\",\"    if (!left || !right) {\",\"      return false;\",\"    }\",\"    return normalize(left) === normalize(right);\",\"  }\",\"\",\"  var projectFile = new File(projectPath);\",\"  if (!projectFile.exists) {\",\"    alert(\\\"Project file not found:\\\" + lineBreak + projectPath);\",\"    return;\",\"  }\",\"\",\"  app.beginUndoGroup(\\\"Relink footage\\\");\",\"  var opened = null;\",\"  try {\",\"    opened = app.open(projectFile);\",\"  } catch (openError) {\",\"    app.endUndoGroup();\",\"    alert(\\\"After Effects did not open the project:\\\" + lineBreak + projectPath + lineBreak + openError.toString());\",\"    return;\",\"  }\",\"  if (!opened) {\",\"    app.endUndoGroup();\",\"    alert(\\\"After Effects did not open the project:\\\" + lineBreak + projectPath);\",\"    return;\",\"  }\",\"\",\"  var missing = [];\",\"  var relinked = 0;\",\"  var baseCount = {};\",\"  var index;\",\"  for (index = 0; index < files.length; index++) {\",\"    var baseKey = String(files[index].oldBasename).toLowerCase();\",\"    if (baseCount[baseKey] === undefined) {\",\"      baseCount[baseKey] = 0;\",\"    }\",\"    baseCount[baseKey] = baseCount[baseKey] + 1;\",\"  }\",\"\",\"  var itemIndex;\",\"  for (itemIndex = 1; itemIndex <= app.project.numItems; itemIndex++) {\",\"    var item = app.project.item(itemIndex);\",\"    if (!item || item.typeName !== \\\"Footage\\\" || !item.file) {\",\"      continue;\",\"    }\",\"    var stored = item.file.fsName;\",\"    var baseName = item.file.name;\",\"    var row = null;\",\"    var fileIndex;\",\"    for (fileIndex = 0; fileIndex < files.length; fileIndex++) {\",\"      if (samePath(stored, files[fileIndex].sourceAbsolute) || samePath(stored, files[fileIndex].oldAbsolute)) {\",\"        row = files[fileIndex];\",\"        break;\",\"      }\",\"    }\",\"    if (!row) {\",\"      var baseKeyMatch = String(baseName).toLowerCase();\",\"      if (baseCount[baseKeyMatch] === 1) {\",\"        for (fileIndex = 0; fileIndex < files.length; fileIndex++) {\",\"          if (String(files[fileIndex].oldBasename).toLowerCase() === baseKeyMatch) {\",\"            row = files[fileIndex];\",\"            break;\",\"          }\",\"        }\",\"      }\",\"    }\",\"    if (!row) {\",\"      missing.push(item.name + \\\" (\\\" + stored + \\\")\\\");\",\"      continue;\",\"    }\",\"    var target = new File(row.newAbsolute);\",\"    if (!target.exists) {\",\"      missing.push(item.name + \\\" missing file \\\" + row.newAbsolute);\",\"      continue;\",\"    }\",\"    try {\",\"      item.replace(target);\",\"      relinked = relinked + 1;\",\"    } catch (replaceError) {\",\"      missing.push(item.name + \\\": \\\" + replaceError.toString());\",\"    }\",\"  }\",\"\",\"  app.project.save();\",\"  app.endUndoGroup();\",\"\",\"  var message;\",\"  if (relinked === 0 && missing.length === 0) {\",\"    message = \\\"No footage files were found in the project.\\\";\",\"  } else {\",\"    message = \\\"Relinked \\\" + relinked + \\\" footage item(s).\\\";\",\"  }\",\"  if (missing.length > 0) {\",\"    message += lineBreak + lineBreak + \\\"Not relinked:\\\";\",\"    var shown = missing.length;\",\"    if (shown > 20) {\",\"      shown = 20;\",\"    }\",\"    var missingIndex;\",\"    for (missingIndex = 0; missingIndex < shown; missingIndex++) {\",\"      message += lineBreak + missing[missingIndex];\",\"    }\",\"    if (missing.length > shown) {\",\"      message += lineBreak + \\\"... and \\\" + (missing.length - shown) + \\\" more\\\";\",\"    }\",\"  }\",\"\",\"  var resultPath = projectFile.parent.fsName + \\\"/ae-relink-result.txt\\\";\",\"  var resultFile = new File(resultPath);\",\"  resultFile.encoding = \\\"UTF-8\\\";\",\"  if (resultFile.open(\\\"w\\\")) {\",\"    resultFile.write(message);\",\"    resultFile.close();\",\"  }\",\"  message += lineBreak + lineBreak + \\\"Result file:\\\" + lineBreak + resultPath;\",\"  alert(message);\",\"})();\",\"\\\"\\\"\\\"\",\"jsx = jsx.replace(\\\"__PROJECT_PATH__\\\", js(project[\\\"newAbsolute\\\"]))\",\"jsx = jsx.replace(\\\"__FILES__\\\", js(footage))\",\"\",\"with open(report_path, \\\"w\\\", encoding=\\\"utf-8\\\") as report_file:\",\"    json.dump(report, report_file, indent=2)\",\"    report_file.write(\\\"\\\\n\\\")\",\"with open(jsx_path, \\\"w\\\", encoding=\\\"utf-8-sig\\\") as jsx_file:\",\"    jsx_file.write(jsx)\",\"\",\"print(\\\"Project: \\\" + project[\\\"newAbsolute\\\"])\",\"print(\\\"Renamed: \\\" + str(len(renamed)))\",\"print(\\\"Footage files: \\\" + str(len(footage)))\",\"print(\\\"JSX: \\\" + jsx_path)\",\"print(\\\"Report: \\\" + report_path)\",\"\"].join(\"\\n\");\n  return [\n    \"bash <<'BASH'\",\n    \"set -euo pipefail\",\n    \"if ! command -v python3 >/dev/null 2>&1; then\",\n    \"  echo \\\"python3 is not available.\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"src=\" + src,\n    \"dest=\" + dest,\n    \"find_text=\" + findText,\n    \"repl_text=\" + replText,\n    \"project_name=\" + projectName,\n    \"python3 - \\\"$src\\\" \\\"$dest\\\" \\\"$find_text\\\" \\\"$repl_text\\\" \\\"$project_name\\\" <<'AE_RELINK_PY'\",\n    script,\n    \"AE_RELINK_PY\",\n    \"BASH\",\n  ].join(\"\\n\");\n})()}}"
+      },
+      "id": "c4a1e8b2-6d47-4f93-8a15-0e7b9c2d4f13",
+      "name": "Rename files and write JSX",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        640,
+        300
+      ],
+      "notes": "Renames matching file names and writes the After Effects script.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "executeOnce": true,
+        "command": "={{(() => {\n  const q = (value) => \"'\" + String(value ?? \"\").replace(/'/g, \"'\\\\''\") + \"'\";\n  const clean = (value) => {\n    const text = String(value ?? \"\").trim().replace(/\\/+$/, \"\");\n    return text || \"/\";\n  };\n  const form = $(\"On form submission\").item.json;\n\n  const dest = q(clean(form.destinationFolder));\n  const ae = q(String(form.afterEffectsBinary ?? \"\").trim());\n  return [\n    \"bash <<'BASH'\",\n    \"set -euo pipefail\",\n    \"dest=\" + dest,\n    \"ae=\" + ae,\n    \"if [ ! -d \\\"$dest\\\" ]; then\",\n    \"  echo \\\"Destination folder does not exist: $dest\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"if [ ! -e \\\"$ae\\\" ]; then\",\n    \"  echo \\\"After Effects binary not found: $ae\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"if [ ! -x \\\"$ae\\\" ]; then\",\n    \"  echo \\\"After Effects binary is not executable: $ae\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"dest_real=$(cd \\\"$dest\\\" && pwd -P)\",\n    \"jsx=\\\"$dest_real/ae-relink.jsx\\\"\",\n    \"log=\\\"$dest_real/ae-launch.log\\\"\",\n    \"if [ ! -f \\\"$jsx\\\" ]; then\",\n    \"  echo \\\"JSX file not found: $jsx\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"nohup \\\"$ae\\\" -r \\\"$jsx\\\" > \\\"$log\\\" 2>&1 &\",\n    \"pid=$!\",\n    \"sleep 1\",\n    \"if ! kill -0 \\\"$pid\\\" 2>/dev/null; then\",\n    \"  echo \\\"After Effects exited immediately. Log: $log\\\" >&2\",\n    \"  cat \\\"$log\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"echo \\\"Started After Effects pid $pid\\\"\",\n    \"echo \\\"Log: $log\\\"\",\n    \"echo \\\"Quit After Effects before the next run if it is still open.\\\"\",\n    \"BASH\",\n  ].join(\"\\n\");\n})()}}"
+      },
+      "id": "c4a1e8b2-6d47-4f93-8a15-0e7b9c2d4f14",
+      "name": "Start After Effects",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        980,
+        300
+      ],
+      "notes": "Starts After Effects and leaves the project open.",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Copy folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy folder": {
+      "main": [
+        [
+          {
+            "node": "Rename files and write JSX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rename files and write JSX": {
+      "main": [
+        [
+          {
+            "node": "Start After Effects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

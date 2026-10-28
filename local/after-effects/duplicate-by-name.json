@@ -1,0 +1,153 @@
+{
+  "name": "Duplicate a folder from a name and an id",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "New influencer folder",
+        "formDescription": "Uploads the clip to https://greenkey.mxjprod.work, copies the influencer template, writes the name and the id, and opens the project. Quit After Effects before you run this form. Keep this page open. It shows the folder when the job finishes.",
+        "responseMode": "onReceived",
+        "authentication": "none",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Name",
+              "fieldName": "name",
+              "fieldType": "text",
+              "placeholder": "Jane Doe",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Id",
+              "fieldName": "id",
+              "fieldType": "text",
+              "placeholder": "IN102",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Clip file",
+              "fieldName": "clip",
+              "fieldType": "text",
+              "placeholder": "/Users/you/Downloads/clip.mp4",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {
+          "buttonLabel": "Create folder",
+          "appendAttribution": false,
+          "respondWithOptions": {
+            "values": {
+              "respondWith": "text",
+              "formSubmittedText": "Greenkey finished. The folder is copied. After Effects is opening the project."
+            }
+          }
+        }
+      },
+      "id": "b7e2c4a1-91d0-4c55-8f3a-6d0e1b2c3a01",
+      "name": "On form submission",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "a91c4e27d5b6470f8c3a1e6d9b0f2451"
+    },
+    {
+      "parameters": {
+        "executeOnce": true,
+        "command": "={{(() => {\n  const templateFolder = \"/Users/glaucomp/Desktop/PackageMaker/ss-influencer\";\n  const jobsFolder = \"/Users/glaucomp/Desktop/PackageMaker/jobs\";\n  const projectFileName = \"ss-Influencer.aep\";\n  const scriptPath = \"/Users/glaucomp/n8n-sugar-scratch/local/after-effects/duplicate_job.py\";\n  const q = (value) => \"'\" + String(value ?? \"\").replace(/'/g, \"'\\\\''\") + \"'\";\n  const form = $(\"On form submission\").item.json;\n  return [\n    \"bash <<'BASH'\",\n    \"set -euo pipefail\",\n    \"if [ ! -f \" + q(scriptPath) + \" ]; then\",\n    \"  echo \\\"Script not found: \" + scriptPath + \"\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"python3 \" + q(scriptPath) + \" \\\\\",\n    \"  --template \" + q(templateFolder) + \" \\\\\",\n    \"  --jobs \" + q(jobsFolder) + \" \\\\\",\n    \"  --name \" + q(form.name) + \" \\\\\",\n    \"  --id \" + q(form.id) + \" \\\\\",\n    \"  --clip \" + q(form.clip) + \" \\\\\",\n    \"  --project \" + q(projectFileName),\n    \"BASH\",\n  ].join(\"\\n\");\n})()}}"
+      },
+      "id": "b7e2c4a1-91d0-4c55-8f3a-6d0e1b2c3a02",
+      "name": "Copy and edit",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        320,
+        300
+      ],
+      "notes": "Uploads the clip to https://greenkey.mxjprod.work, then copies ss-influencer and writes the name and the id.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "executeOnce": true,
+        "command": "={{(() => {\n  const q = (value) => \"'\" + String(value ?? \"\").replace(/'/g, \"'\\\\''\") + \"'\";\n  const afterEffectsBinary = \"/Applications/Adobe After Effects 2026/Adobe After Effects 2026.app/Contents/MacOS/After Effects\";\n  const stdout = String($(\"Copy and edit\").item.json.stdout ?? \"\");\n  const line = stdout.split(\"\\n\").reverse().find((row) => row.startsWith(\"AE_JOB \"));\n  if (!line) {\n    throw new Error(\"The copy step did not report the new folder.\");\n  }\n  const job = JSON.parse(line.slice(\"AE_JOB \".length));\n  const dest = q(job.destination);\n  const ae = q(afterEffectsBinary);\n  return [\n    \"bash <<'BASH'\",\n    \"set -euo pipefail\",\n    \"dest=\" + dest,\n    \"ae=\" + ae,\n    \"if [ ! -d \\\"$dest\\\" ]; then\",\n    \"  echo \\\"Destination folder does not exist: $dest\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"if [ ! -e \\\"$ae\\\" ]; then\",\n    \"  echo \\\"After Effects binary not found: $ae\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"if [ ! -x \\\"$ae\\\" ]; then\",\n    \"  echo \\\"After Effects binary is not executable: $ae\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"dest_real=$(cd \\\"$dest\\\" && pwd -P)\",\n    \"jsx=\\\"$dest_real/ae-relink.jsx\\\"\",\n    \"log=\\\"$dest_real/ae-launch.log\\\"\",\n    \"if [ ! -f \\\"$jsx\\\" ]; then\",\n    \"  echo \\\"JSX file not found: $jsx\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"nohup \\\"$ae\\\" -r \\\"$jsx\\\" > \\\"$log\\\" 2>&1 &\",\n    \"pid=$!\",\n    \"sleep 1\",\n    \"if ! kill -0 \\\"$pid\\\" 2>/dev/null; then\",\n    \"  echo \\\"After Effects exited immediately. Log: $log\\\" >&2\",\n    \"  cat \\\"$log\\\" >&2\",\n    \"  exit 1\",\n    \"fi\",\n    \"echo \\\"Started After Effects pid $pid\\\"\",\n    \"echo \\\"Folder: $dest_real\\\"\",\n    \"echo \\\"Log: $log\\\"\",\n    \"echo \\\"Quit After Effects before the next run if it is still open.\\\"\",\n    \"BASH\",\n  ].join(\"\\n\");\n})()}}"
+      },
+      "id": "b7e2c4a1-91d0-4c55-8f3a-6d0e1b2c3a03",
+      "name": "Start After Effects",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        640,
+        300
+      ],
+      "notes": "Opens the copy and relinks footage to the edited files.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Folder ready",
+        "completionMessage": "={{ \"Greenkey finished. The folder is copied. After Effects is opening the project.\\n\" + (($(\"Start After Effects\").first().json.stdout.match(/Folder: .*/) || [\"\"])[0]) }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "b7e2c4a1-91d0-4c55-8f3a-6d0e1b2c3a04",
+      "name": "Show the result",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        960,
+        300
+      ],
+      "notes": "Shows the finished folder on the form page after Greenkey and After Effects.",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Copy and edit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy and edit": {
+      "main": [
+        [
+          {
+            "node": "Start After Effects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start After Effects": {
+      "main": [
+        [
+          {
+            "node": "Show the result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 7200
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

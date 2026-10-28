@@ -1,0 +1,313 @@
+import type { WorkBook, WritingOptions } from '@e965/xlsx';
+import { utils as xlsxUtils, write as xlsxWrite } from '@e965/xlsx';
+import { flattenObject } from '@utils/utilities';
+import iconv from 'iconv-lite';
+import get from 'lodash/get';
+import type {
+	IBinaryData,
+	IBinaryKeyData,
+	IDataObject,
+	IExecuteFunctions,
+	INodeExecutionData,
+} from 'n8n-workflow';
+import { deepCopy, NodeOperationError, BINARY_ENCODING } from 'n8n-workflow';
+import type { TextContent as PdfTextContent } from 'pdfjs-dist/types/src/display/api';
+
+export type JsonToSpreadsheetBinaryFormat = 'csv' | 'html' | 'rtf' | 'ods' | 'xls' | 'xlsx';
+
+export type JsonToSpreadsheetBinaryOptions = {
+	headerRow?: boolean;
+	compression?: boolean;
+	fileName?: string;
+	sheetName?: string;
+	delimiter?: string;
+};
+
+export type JsonToBinaryOptions = {
+	fileName?: string;
+	sourceKey?: string;
+	encoding?: string;
+	addBOM?: boolean;
+	mimeType?: string;
+	dataIsBase64?: boolean;
+	strictBase64?: boolean;
+	itemIndex?: number;
+	format?: boolean;
+};
+
+function isByteArray(value: unknown[]): value is number[] {
+	return Array.from(value).every(
+		(byte) => typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255,
+	);
+}
+
+export async function convertJsonToSpreadsheetBinary(
+	this: IExecuteFunctions,
+	items: INodeExecutionData[],
+	fileFormat: JsonToSpreadsheetBinaryFormat,
+	options: JsonToSpreadsheetBinaryOptions,
+	defaultFileName = 'spreadsheet',
+): Promise<IBinaryData> {
+	const itemData: IDataObject[] = [];
+	for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+		itemData.push(flattenObject(items[itemIndex].json));
+	}
+
+	let sheetToJsonOptions;
+	if (options.headerRow === false) {
+		sheetToJsonOptions = { skipHeader: true };
+	}
+
+	const sheet = xlsxUtils.json_to_sheet(itemData, sheetToJsonOptions);
+
+	const writingOptions: WritingOptions = {
+		bookType: fileFormat,
+		bookSST: false,
+		type: 'buffer',
+	};
+
+	if (fileFormat === 'csv' && options.delimiter?.length) {
+		writingOptions.FS = options.delimiter ?? ',';
+	}
+
+	if (['xlsx', 'ods'].includes(fileFormat) && options.compression) {
+		writingOptions.compression = true;
+	}
+
+	// Convert the data in the correct format
+	const sheetName = (options.sheetName as string) || 'Sheet';
+	const workbook: WorkBook = {
+		SheetNames: [sheetName],
+		Sheets: {
+			[sheetName]: sheet,
+		},
+	};
+
+	const buffer: Buffer = xlsxWrite(workbook, writingOptions);
+	const fileName =
+		options.fileName !== undefined ? options.fileName : `${defaultFileName}.${fileFormat}`;
+	const binaryData = await this.helpers.prepareBinaryData(buffer, fileName);
+
+	return binaryData;
+}
+
+/** Converts the selected input value to binary data with the configured encoding. */
+export async function createBinaryFromJson(
+	this: IExecuteFunctions,
+	data: IDataObject | IDataObject[],
+	options: JsonToBinaryOptions,
+): Promise<IBinaryData> {
+	let value: unknown;
+	if (options.sourceKey) {
+		value = get(data, options.sourceKey);
+	} else {
+		value = data;
+	}
+
+	if (value === undefined) {
+		throw new NodeOperationError(this.getNode(), `The value in "${options.sourceKey}" is not set`, {
+			itemIndex: options.itemIndex || 0,
+		});
+	}
+
+	let buffer: Buffer;
+	let mimeType = options.mimeType;
+	if (!options.dataIsBase64) {
+		let valueAsString = value as unknown as string;
+
+		if (typeof value === 'object') {
+			mimeType = 'application/json';
+			if (options.format) {
+				valueAsString = JSON.stringify(value, null, 2);
+			} else {
+				valueAsString = JSON.stringify(value);
+			}
+		}
+
+		buffer = iconv.encode(valueAsString, options.encoding || 'utf8', {
+			addBOM: options.addBOM,
+		});
+	} else {
+		const invalidBase64 = () =>
+			new NodeOperationError(
+				this.getNode(),
+				`The value in "${options.sourceKey}" is not valid Base64 data`,
+				{
+					description: 'Use Convert to Text File to write plain text to a file.',
+					itemIndex: options.itemIndex ?? 0,
+				},
+			);
+
+		if (Buffer.isBuffer(value)) {
+			buffer = value;
+		} else if (Array.isArray(value)) {
+			if (options.strictBase64 && !isByteArray(value)) throw invalidBase64();
+			buffer = Buffer.from(value);
+		} else if (
+			typeof value === 'object' &&
+			value !== null &&
+			'type' in value &&
+			value.type === 'Buffer' &&
+			'data' in value &&
+			Array.isArray(value.data)
+		) {
+			if (options.strictBase64 && !isByteArray(value.data)) throw invalidBase64();
+			buffer = Buffer.from(value.data);
+		} else {
+			if (typeof value !== 'string') {
+				throw invalidBase64();
+			}
+
+			let encoded = value.trim();
+			if (/^data:/i.test(encoded)) {
+				const dataUri = /^data:([^;,]*)(?:;[^;,]*)*;base64,([\s\S]*)$/i.exec(encoded);
+				if (dataUri) {
+					mimeType ||= dataUri[1] || undefined;
+					encoded = dataUri[2];
+				} else if (options.strictBase64) {
+					throw invalidBase64();
+				}
+			}
+
+			if (options.strictBase64) {
+				encoded = encoded.replace(/\s/g, '');
+				const match = /^([A-Za-z0-9+/_-]*)(={0,2})$/.exec(encoded);
+				// Preserve unpadded and URL-safe input, but reject incomplete groups and misplaced padding.
+				if (
+					!match ||
+					match[1].length % 4 === 1 ||
+					(match[2].length > 0 && (encoded.length % 4 !== 0 || match[1].length % 4 === 0))
+				) {
+					throw invalidBase64();
+				}
+			}
+
+			buffer = Buffer.from(encoded, BINARY_ENCODING);
+		}
+	}
+
+	const binaryData = await this.helpers.prepareBinaryData(buffer, options.fileName, mimeType);
+
+	if (!binaryData.fileName) {
+		const fileExtension = binaryData.fileExtension ? `.${binaryData.fileExtension}` : '';
+		binaryData.fileName = `file${fileExtension}`;
+	}
+
+	return binaryData;
+}
+
+const parseText = (textContent: PdfTextContent) => {
+	let lastY = undefined;
+	const text = [];
+	for (const item of textContent.items) {
+		if ('str' in item) {
+			if (lastY == item.transform[5] || !lastY) {
+				text.push(item.str);
+			} else {
+				text.push(`\n${item.str}`);
+			}
+			lastY = item.transform[5];
+		}
+	}
+	return text.join('');
+};
+
+export async function extractDataFromPDF(
+	this: IExecuteFunctions,
+	binaryPropertyName: string,
+	password?: string,
+	maxPages?: number,
+	joinPages = true,
+	itemIndex = 0,
+) {
+	const binaryData = this.helpers.assertBinaryData(itemIndex, binaryPropertyName);
+
+	let buffer: Buffer;
+	if (binaryData.id) {
+		const stream = await this.helpers.getBinaryStream(binaryData.id);
+		buffer = await this.helpers.binaryToBuffer(stream);
+	} else {
+		buffer = Buffer.from(binaryData.data, BINARY_ENCODING);
+	}
+
+	// Polyfill DOMMatrix for pdfjs-dist in Node.js environments without canvas
+	if (typeof globalThis.DOMMatrix === 'undefined') {
+		const { default: DOMMatrix } = await import('@thednp/dommatrix');
+		globalThis.DOMMatrix = DOMMatrix as unknown as typeof globalThis.DOMMatrix;
+	}
+
+	const { getDocument: readPDF, version: pdfJsVersion } = await import(
+		'pdfjs-dist/legacy/build/pdf.mjs'
+	);
+	const document = await readPDF({
+		password,
+		data: new Uint8Array(buffer),
+	}).promise;
+	const { info: documentInfo, metadata } = await document
+		.getMetadata()
+		.catch(() => ({ info: null, metadata: null }));
+	// pdfjs-dist returns custom info entries as a Map, which JSON serializes as an empty object.
+	const info =
+		documentInfo && 'Custom' in documentInfo && documentInfo.Custom instanceof Map
+			? { ...documentInfo, Custom: Object.fromEntries(documentInfo.Custom) }
+			: documentInfo;
+
+	const pages = [];
+	if (maxPages !== 0) {
+		let pagesToRead = document.numPages;
+		if (maxPages && maxPages < document.numPages) {
+			pagesToRead = maxPages;
+		}
+		for (let i = 1; i <= pagesToRead; i++) {
+			const page = await document.getPage(i);
+			const text = await page.getTextContent().then(parseText);
+			pages.push(text);
+		}
+	}
+
+	const text = joinPages ? pages.join('\n\n') : pages;
+
+	const returnData = {
+		numpages: document.numPages,
+		numrender: document.numPages,
+		info,
+		metadata: (metadata && Object.fromEntries([...metadata])) ?? undefined,
+		text,
+		version: pdfJsVersion,
+	};
+
+	return returnData;
+}
+
+export function prepareBinariesDataList(data: string | string[] | IBinaryData | IBinaryData[]) {
+	if (Array.isArray(data)) return data;
+	if (typeof data === 'object') return [data];
+	return data.split(',').map((item: string) => item.trim());
+}
+
+/**
+ * Splits a database row into binary fields and JSON-safe fields: values recognized as binary
+ * (Buffers by default) are routed to `binary` via `prepareBinaryData`, and the rest are
+ * deep-copied so driver-native values (Dates, ObjectIds, ...) serialize to plain JSON.
+ * Pass `toBuffer` to recognize driver-specific binary wrappers (e.g. MongoDB's `Binary`).
+ */
+export async function routeBinaryProperties(
+	this: IExecuteFunctions,
+	row: IDataObject,
+	toBuffer: (value: unknown) => Buffer | undefined = (value) =>
+		Buffer.isBuffer(value) ? value : undefined,
+): Promise<{ json: IDataObject; binary: IBinaryKeyData }> {
+	const json = new Map<string, IDataObject[string]>();
+	const binary = new Map<string, IBinaryData>();
+
+	for (const [key, value] of Object.entries(row)) {
+		const buffer = toBuffer(value);
+		if (buffer) {
+			binary.set(key, await this.helpers.prepareBinaryData(buffer, key));
+		} else {
+			json.set(key, deepCopy(value));
+		}
+	}
+
+	return { json: Object.fromEntries(json), binary: Object.fromEntries(binary) };
+}
