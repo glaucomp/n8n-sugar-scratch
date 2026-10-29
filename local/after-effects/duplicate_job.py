@@ -132,23 +132,31 @@ JSX = r"""(function () {
     var positionProp = videoLayer.property("Position");
     var scaleProp = videoLayer.property("Scale");
     // The template anchor sits on the top of the clip. Keep that vertical
-    // anchor and the vertical position. A center anchor makes scale slide
-    // the picture out of the square.
+    // anchor. A center anchor makes scale slide the picture out of the square.
     var anchorY = anchorProp.value[1];
-    var positionY = positionProp.value[1];
     clearKeys(anchorProp);
     clearKeys(positionProp);
     clearKeys(scaleProp);
     setXY(anchorProp, srcW / 2, anchorY);
+    var bounds = videoLayer.sourceRectAtTime(0, false);
+    var contentW = bounds && bounds.width > 2 ? bounds.width : srcW;
+    var contentH = bounds && bounds.height > 2 ? bounds.height : source.height;
+    var contentLeft = bounds && bounds.width > 2 ? bounds.left : 0;
+    var contentTop = bounds && bounds.height > 2 ? bounds.top : 0;
+    // Fit the visible pixels inside the placement square, a little smaller
+    // than the window so the head stays under the top of the card.
     var fitPortion = 0.7;
-    var scale = Math.min(box.width / srcW, box.height / source.height) * fitPortion * 100;
+    var scale = Math.min(box.width / contentW, box.height / contentH) * fitPortion * 100;
     var scaleCurrent = scaleProp.value;
     if (scaleCurrent.length > 2) {
       scaleProp.setValue([scale, scale, scaleCurrent[2]]);
     } else {
       scaleProp.setValue([scale, scale]);
     }
-    setXY(positionProp, box.left + box.width / 2, positionY);
+    var factor = scale / 100;
+    var positionX = box.left + box.width / 2 - (contentLeft + contentW / 2 - srcW / 2) * factor;
+    var positionY = box.top - (contentTop - anchorY) * factor;
+    setXY(positionProp, positionX, positionY);
     return true;
   }
 
