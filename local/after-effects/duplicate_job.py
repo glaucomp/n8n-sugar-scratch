@@ -83,6 +83,75 @@ JSX = r"""(function () {
     alert(message);
   }
 
+  function clearKeys(prop) {
+    if (!prop) {
+      return;
+    }
+    if (prop.expressionEnabled) {
+      prop.expressionEnabled = false;
+    }
+    while (prop.numKeys > 0) {
+      prop.removeKey(1);
+    }
+  }
+
+  function setXY(prop, x, y) {
+    var current = prop.value;
+    if (current.length > 2) {
+      prop.setValue([x, y, current[2]]);
+    } else {
+      prop.setValue([x, y]);
+    }
+  }
+
+  function layerBox(layer) {
+    var rect = layer.sourceRectAtTime(0, false);
+    var scale = layer.property("Scale").value;
+    var pos = layer.property("Position").value;
+    var anchor = layer.property("Anchor Point").value;
+    var sx = scale[0] / 100;
+    var sy = scale[1] / 100;
+    return {
+      left: pos[0] + (rect.left - anchor[0]) * sx,
+      top: pos[1] + (rect.top - anchor[1]) * sy,
+      width: rect.width * Math.abs(sx),
+      height: rect.height * Math.abs(sy)
+    };
+  }
+
+  function fitLayer(videoLayer, box) {
+    var source = videoLayer.source;
+    if (!source || source.width < 2 || source.height < 2) {
+      return false;
+    }
+    if (!box || box.width < 2 || box.height < 2) {
+      return false;
+    }
+    var srcW = source.width;
+    var anchorProp = videoLayer.property("Anchor Point");
+    var positionProp = videoLayer.property("Position");
+    var scaleProp = videoLayer.property("Scale");
+    // The template anchor sits on the top of the clip. Keep that vertical
+    // anchor and the vertical position. A center anchor makes scale slide
+    // the picture out of the square.
+    var anchorY = anchorProp.value[1];
+    var positionY = positionProp.value[1];
+    clearKeys(anchorProp);
+    clearKeys(positionProp);
+    clearKeys(scaleProp);
+    setXY(anchorProp, srcW / 2, anchorY);
+    var fitPortion = 0.7;
+    var scale = Math.min(box.width / srcW, box.height / source.height) * fitPortion * 100;
+    var scaleCurrent = scaleProp.value;
+    if (scaleCurrent.length > 2) {
+      scaleProp.setValue([scale, scale, scaleCurrent[2]]);
+    } else {
+      scaleProp.setValue([scale, scale]);
+    }
+    setXY(positionProp, box.left + box.width / 2, positionY);
+    return true;
+  }
+
   var projectFile = scriptFile(projectPath);
   if (!projectFile.exists) {
     stop("Failed. Project file not found:" + lineBreak + projectPath);
@@ -163,10 +232,44 @@ JSX = r"""(function () {
     }
   }
 
-  // Leave Anchor Point, Position, and Scale on influencer_alpha as they are
-  // in the template. The anchor sits on the top of the clip, so nudging the
-  // top scales the picture further inside the placement instead of sliding
-  // it out. Writing a center anchor here undoes that.
+  var fitted = 0;
+  try {
+    var compIndex;
+    for (compIndex = 1; compIndex <= app.project.numItems; compIndex++) {
+      var compItem = app.project.item(compIndex);
+      if (!compItem || !(compItem instanceof CompItem)) {
+        continue;
+      }
+      var placementLayer = null;
+      var layerIndex;
+      for (layerIndex = 1; layerIndex <= compItem.numLayers; layerIndex++) {
+        var namedLayer = compItem.layer(layerIndex);
+        if (namedLayer && String(namedLayer.name).toLowerCase() === "placement") {
+          placementLayer = namedLayer;
+          break;
+        }
+      }
+      for (layerIndex = 1; layerIndex <= compItem.numLayers; layerIndex++) {
+        var videoLayer = compItem.layer(layerIndex);
+        if (!videoLayer || !(videoLayer instanceof AVLayer) || !videoLayer.source || !videoLayer.source.file) {
+          continue;
+        }
+        if (!samePath(videoLayer.source.file.fsName, alphaPath)) {
+          continue;
+        }
+        var box = placementLayer ? layerBox(placementLayer) : null;
+        if (!box || box.width < 2 || box.height < 2) {
+          box = { left: 0, top: 0, width: compItem.width, height: compItem.height };
+        }
+        if (fitLayer(videoLayer, box)) {
+          fitted = fitted + 1;
+        }
+      }
+    }
+  } catch (fitError) {
+    missing.push("Fit: " + fitError.toString());
+  }
+
   app.project.save();
   app.endUndoGroup();
 
@@ -183,6 +286,9 @@ JSX = r"""(function () {
     message += lineBreak + "No footage files were found in the project.";
   } else {
     message += lineBreak + "Relinked " + relinked + " footage item(s).";
+  }
+  if (fitted > 0) {
+    message += lineBreak + "Fitted the video inside the frame.";
   }
   if (missing.length > 0) {
     message += lineBreak + lineBreak + "Not relinked:";
