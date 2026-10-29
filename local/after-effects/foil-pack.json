@@ -1,0 +1,56 @@
+{
+  "id": "FDm9zN2XA6ZEfsMO",
+  "name": "Foil 3D pack",
+  "active": true,
+  "nodes": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        260,
+        300
+      ],
+      "webhookId": "foil-pack",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "foil-pack",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "Run the foil flow",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        560,
+        300
+      ],
+      "notes": "Runs the Mac steps for this name and code, and posts each line back to the waiting page.",
+      "notesInFlow": true,
+      "parameters": {
+        "executeOnce": false,
+        "command": "={{(() => {\n  const hook = $json;\n  const body = hook.body && typeof hook.body === \"object\" ? hook.body : hook;\n  const q = (value) => \"'\" + String(value ?? \"\").replace(/'/g, \"'\\\\''\") + \"'\";\n  const name = String(body.name || \"\");\n  const code = String(body.code || body.id || \"\");\n  const clip = String(body.clip || \"\");\n  const progressUrl = String(body.progressUrl || \"\");\n  const progressToken = String(body.progressToken || \"\");\n  const payload = JSON.stringify({ name, id: code, clip, kind: String(body.kind || \"\"), model_id: String(body.model_id || \"\") });\n  return [\n    \"export INFLUENCER_PROGRESS_URL=\" + q(progressUrl),\n    \"export INFLUENCER_PROGRESS_TOKEN=\" + q(progressToken),\n    \"export INFLUENCER_NAME=\" + q(name),\n    \"export INFLUENCER_CODE=\" + q(code),\n    \"export INFLUENCER_PAYLOAD=\" + q(payload),\n    \"node <<'NODE'\",\n    \"const http = require('http');\",\n    \"const https = require('https');\",\n    \"const {URL} = require('url');\",\n    \"function rewrite(url) {\",\n    \"  return String(url || '').replace(/127\\\\.0\\\\.0\\\\.1/g, 'host.docker.internal').replace(/localhost/g, 'host.docker.internal');\",\n    \"}\",\n    \"function post(urlString, payload, token) {\",\n    \"  return new Promise((resolve, reject) => {\",\n    \"    const url = new URL(urlString);\",\n    \"    const body = Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload));\",\n    \"    const lib = url.protocol === 'https:' ? https : http;\",\n    \"    const req = lib.request({\",\n    \"      hostname: url.hostname,\",\n    \"      port: url.port || (url.protocol === 'https:' ? 443 : 80),\",\n    \"      path: url.pathname + url.search,\",\n    \"      method: 'POST',\",\n    \"      headers: {'Content-Type': 'application/json', 'Content-Length': body.length, 'X-Progress-Token': token || ''},\",\n    \"    }, (res) => {\",\n    \"      const chunks = [];\",\n    \"      res.on('data', (chunk) => chunks.push(chunk));\",\n    \"      res.on('end', () => resolve({status: res.statusCode, body: Buffer.concat(chunks).toString('utf8')}));\",\n    \"    });\",\n    \"    req.setTimeout(7200000, () => req.destroy(new Error('timeout')));\",\n    \"    req.on('error', reject);\",\n    \"    req.write(body);\",\n    \"    req.end();\",\n    \"  });\",\n    \"}\",\n    \"(async () => {\",\n    \"  const token = process.env.INFLUENCER_PROGRESS_TOKEN || '';\",\n    \"  const base = rewrite(process.env.INFLUENCER_PROGRESS_URL || '');\",\n    \"  async function say(line) {\",\n    \"    process.stdout.write(line + '\\\\n');\",\n    \"    if (!base) return;\",\n    \"    try { await post(base, {line}, token); } catch (error) {}\",\n    \"  }\",\n    \"  await say('n8n: foil flow started for ' + (process.env.INFLUENCER_NAME || '') + ' / ' + (process.env.INFLUENCER_CODE || ''));\",\n    \"  await say('n8n: running the Mac steps from this workflow');\",\n    \"  if (!base) {\",\n    \"    await say('influencer-n8n-error: missing progress url');\",\n    \"    process.exit(1);\",\n    \"  }\",\n    \"  const result = await post(base.replace(/\\\\/$/, '') + '/run', process.env.INFLUENCER_PAYLOAD || '{}', token);\",\n    \"  process.stdout.write(result.body + '\\\\n');\",\n    \"  if (result.status !== 200) {\",\n    \"    await say('influencer-n8n-error: ' + String(result.body || '').trim() || ('the Mac step returned ' + result.status));\",\n    \"    process.exit(1);\",\n    \"  }\",\n    \"})().catch((error) => {\",\n    \"  process.stderr.write(String(error && error.stack || error) + '\\\\n');\",\n    \"  process.exit(1);\",\n    \"});\",\n    \"\",\n    \"NODE\"\n  ].join(\"\\n\");\n})()}}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Run the foil flow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

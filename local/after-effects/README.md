@@ -6,7 +6,7 @@ These files are local tools. Keep them out of git.
 
 ## Duplicate a folder from a name and an id
 
-Import [duplicate-by-name.json](duplicate-by-name.json) again after this file changes. The form asks for a name, an id, and the clip path. Keep the form page open. The workflow uploads that mp4 or mov to https://greenkey.mxjprod.work and waits for the alpha movie. It then copies `ss-influencer`, writes the name and the id, puts the alpha movie in the copy, and opens the copy in After Effects. The same page then shows the new folder.
+Import [duplicate-by-name.json](duplicate-by-name.json) again after this file changes. The form asks for a name, an id, and the clip path. Keep the form page open. The operator app can also POST the same fields to `/webhook/influencer`, plus `progressUrl` and `progressToken`. Each line is posted there while the run is still going, so the waiting page can show it. Docker n8n cannot start After Effects, so that workflow calls the Mac API and the Mac runs the script. The workflow uploads that mp4 or mov to https://greenkey.mxjprod.work and waits for the alpha movie. It then copies `ss-influencer`, writes the name and the id, puts the alpha movie in the copy, and opens the copy in After Effects. The same page then shows the new folder.
 
 The template folder is `/Users/glaucomp/Desktop/PackageMaker/ss-influencer`. Each run creates a new folder under `/Users/glaucomp/Desktop/PackageMaker/jobs`. The folder name is `SS-`, then the id, then `|`, then the name. Id `234` and name `Glauca` create `SS-234|Glauca`. The template folder stays unchanged.
 

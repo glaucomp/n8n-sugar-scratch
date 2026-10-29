@@ -144,6 +144,116 @@ JSX = r"""(function () {
     }
   }
 
+  function clearKeys(prop) {
+    if (!prop) {
+      return;
+    }
+    if (prop.expressionEnabled) {
+      prop.expressionEnabled = false;
+    }
+    while (prop.numKeys > 0) {
+      prop.removeKey(1);
+    }
+  }
+
+  function setXY(prop, x, y) {
+    var current = prop.value;
+    if (current.length > 2) {
+      prop.setValue([x, y, current[2]]);
+    } else {
+      prop.setValue([x, y]);
+    }
+  }
+
+  function layerBox(layer) {
+    var rect = layer.sourceRectAtTime(0, false);
+    var scale = layer.property("Scale").value;
+    var pos = layer.property("Position").value;
+    var anchor = layer.property("Anchor Point").value;
+    var sx = scale[0] / 100;
+    var sy = scale[1] / 100;
+    return {
+      left: pos[0] + (rect.left - anchor[0]) * sx,
+      top: pos[1] + (rect.top - anchor[1]) * sy,
+      width: rect.width * Math.abs(sx),
+      height: rect.height * Math.abs(sy)
+    };
+  }
+
+  function fitLayer(videoLayer, box) {
+    var source = videoLayer.source;
+    if (!source || source.width < 2 || source.height < 2) {
+      return false;
+    }
+    if (!box || box.width < 2 || box.height < 2) {
+      return false;
+    }
+    var srcW = source.width;
+    var srcH = source.height;
+    // Sit inside the placement, smaller than the window, with the top of the
+    // clip under the top of that window so the card title stays visible.
+    var fitPortion = 0.7;
+    var scale = Math.min(box.width / srcW, box.height / srcH) * fitPortion * 100;
+    var anchorProp = videoLayer.property("Anchor Point");
+    var positionProp = videoLayer.property("Position");
+    var scaleProp = videoLayer.property("Scale");
+    clearKeys(anchorProp);
+    clearKeys(positionProp);
+    clearKeys(scaleProp);
+    setXY(anchorProp, srcW / 2, srcH / 2);
+    var scaleCurrent = scaleProp.value;
+    if (scaleCurrent.length > 2) {
+      scaleProp.setValue([scale, scale, scaleCurrent[2]]);
+    } else {
+      scaleProp.setValue([scale, scale]);
+    }
+    var fittedHeight = srcH * scale / 100;
+    setXY(positionProp, box.left + box.width / 2, box.top + fittedHeight / 2);
+    return true;
+  }
+
+  var fitted = 0;
+  var fitNote = "";
+  try {
+    var compIndex;
+    for (compIndex = 1; compIndex <= app.project.numItems; compIndex++) {
+      var compItem = app.project.item(compIndex);
+      if (!compItem || !(compItem instanceof CompItem)) {
+        continue;
+      }
+      var placementLayer = null;
+      var layerIndex;
+      for (layerIndex = 1; layerIndex <= compItem.numLayers; layerIndex++) {
+        var namedLayer = compItem.layer(layerIndex);
+        if (namedLayer && String(namedLayer.name).toLowerCase() === "placement") {
+          placementLayer = namedLayer;
+          break;
+        }
+      }
+      for (layerIndex = 1; layerIndex <= compItem.numLayers; layerIndex++) {
+        var videoLayer = compItem.layer(layerIndex);
+        if (!videoLayer || !(videoLayer instanceof AVLayer) || !videoLayer.source || !videoLayer.source.file) {
+          continue;
+        }
+        if (!samePath(videoLayer.source.file.fsName, alphaPath)) {
+          continue;
+        }
+        var box = placementLayer ? layerBox(placementLayer) : null;
+        if (!box || box.width < 2 || box.height < 2) {
+          box = { left: 0, top: 0, width: compItem.width, height: compItem.height };
+        }
+        if (fitLayer(videoLayer, box)) {
+          fitted = fitted + 1;
+          if (compItem.openInViewer) {
+            compItem.openInViewer();
+          }
+        }
+      }
+    }
+  } catch (fitError) {
+    fitNote = "Could not fit the video: " + fitError.toString();
+  }
+
   app.project.save();
   app.endUndoGroup();
 
@@ -152,6 +262,12 @@ JSX = r"""(function () {
     message += lineBreak + "No footage files were found in the project.";
   } else {
     message += lineBreak + "Relinked " + relinked + " footage item(s).";
+  }
+  if (fitted > 0) {
+    message += lineBreak + "Fitted the video inside the frame.";
+  }
+  if (fitNote) {
+    message += lineBreak + fitNote;
   }
   if (missing.length > 0) {
     message += lineBreak + lineBreak + "Not relinked:";
@@ -194,8 +310,6 @@ JSX = r"""(function () {
     resultFile.write(message);
     resultFile.close();
   }
-  message += lineBreak + lineBreak + "Result file:" + lineBreak + resultPath;
-  alert(message);
 })();
 """
 
@@ -620,6 +734,19 @@ def point_alpha_at(footage: list, template: str, dest: str, final_path: str) -> 
     )
 
 
+def next_job_folder(jobs_parent: str, folder_name: str) -> str:
+    """Pick a free folder. A repeat of the same name and id gets a number."""
+    dest = os.path.join(jobs_parent, folder_name)
+    if not os.path.lexists(dest):
+        return dest
+    for number in range(2, 100):
+        candidate = os.path.join(jobs_parent, folder_name + " " + str(number))
+        if not os.path.lexists(candidate):
+            print("That folder already exists. Using " + os.path.basename(candidate), flush=True)
+            return candidate
+    fail("Too many folders already use the name " + folder_name)
+
+
 def run(args: argparse.Namespace) -> None:
     name = clean_text(args.name, "Name")
     card_id = clean_text(args.id, "Id")
@@ -643,9 +770,7 @@ def run(args: argparse.Namespace) -> None:
 
     jobs_parent = ensure_jobs(args.jobs)
     folder_name = "SS-" + folder_part(card_id, "Id") + "|" + folder_part(name, "Name")
-    dest = os.path.join(jobs_parent, folder_name)
-    if os.path.lexists(dest):
-        fail("Destination already exists: " + dest)
+    dest = next_job_folder(jobs_parent, folder_name)
     if is_inside(dest, template) or is_inside(template, dest) or dest == template:
         fail("Destination must be outside the template folder.")
 
@@ -667,6 +792,9 @@ def run(args: argparse.Namespace) -> None:
             "dataFile": data_path,
             "projectPath": project["newAbsolute"],
         }
+        kind = os.environ.get("FOIL_PACK_KIND", "").strip()
+        if kind in ("pack-face", "pack-face-2"):
+            report["kind"] = kind
         with open(os.path.join(dest, "ae-relink-report.json"), "w", encoding="utf-8") as report_file:
             json.dump(report, report_file, indent=2)
             report_file.write("\n")
@@ -691,7 +819,60 @@ def run(args: argparse.Namespace) -> None:
     print("AE_JOB " + json.dumps({"destination": dest}, ensure_ascii=True))
 
 
+def post_progress(line: str) -> None:
+    """Send one runtime line to the operator page that is waiting on this run."""
+    url = os.environ.get("INFLUENCER_PROGRESS_URL", "").strip()
+    token = os.environ.get("INFLUENCER_PROGRESS_TOKEN", "").strip()
+    text = line.strip()
+    if not url or not text:
+        return
+    payload = json.dumps({"line": text}).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Progress-Token": token,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            response.read()
+    except Exception:
+        return
+
+
+class _ProgressStream:
+    def __init__(self, stream):
+        self.stream = stream
+        self.pending = ""
+
+    def write(self, text: str) -> int:
+        self.stream.write(text)
+        self.stream.flush()
+        self.pending += text
+        while "\n" in self.pending:
+            line, self.pending = self.pending.split("\n", 1)
+            post_progress(line)
+        return len(text)
+
+    def flush(self) -> None:
+        if self.pending:
+            post_progress(self.pending)
+            self.pending = ""
+        self.stream.flush()
+
+
+def install_progress_reports() -> None:
+    if not os.environ.get("INFLUENCER_PROGRESS_URL", "").strip():
+        return
+    sys.stdout = _ProgressStream(sys.stdout)
+    sys.stderr = _ProgressStream(sys.stderr)
+
+
 def main() -> None:
+    install_progress_reports()
     try:
         run(parse_args())
     except JobError as error:
