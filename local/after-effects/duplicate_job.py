@@ -42,6 +42,7 @@ JSX = r"""(function () {
   var personName = __NAME__;
   var cardId = __ID__;
   var alphaPath = __ALPHA_PATH__;
+  var resultPath = __RESULT_PATH__;
   var lineBreak = String.fromCharCode(10);
 
   function normalize(value) {
@@ -60,16 +61,34 @@ JSX = r"""(function () {
   }
 
   function scriptFile(path) {
-    return new File(encodeURI(path));
+    // encodeURI turns a literal | into %7C, so After Effects does not treat it as a volume separator.
+    // It leaves parentheses alone. Footage lives in (Footage), so those must be encoded too.
+    var uri = encodeURI(String(path));
+    uri = uri.split("(").join("%28").split(")").join("%29");
+    return new File(uri);
+  }
+
+  function writeResult(message) {
+    var resultFile = scriptFile(resultPath);
+    resultFile.encoding = "UTF-8";
+    resultFile.lineFeed = "Unix";
+    if (resultFile.open("w")) {
+      resultFile.write(message);
+      resultFile.close();
+    }
+  }
+
+  function stop(message) {
+    writeResult(message);
+    alert(message);
   }
 
   var projectFile = scriptFile(projectPath);
   if (!projectFile.exists) {
-    alert("Project file not found:" + lineBreak + projectPath);
+    stop("Failed. Project file not found:" + lineBreak + projectPath);
     return;
   }
 
-  app.beginUndoGroup("Relink footage");
   var opened = null;
   try {
     if (app.project && app.project.file && samePath(app.project.file.fsName, projectPath)) {
@@ -78,15 +97,15 @@ JSX = r"""(function () {
       opened = app.open(projectFile);
     }
   } catch (openError) {
-    app.endUndoGroup();
-    alert("After Effects did not open the project:" + lineBreak + projectPath + lineBreak + openError.toString());
+    stop("Failed. After Effects did not open the project:" + lineBreak + projectPath + lineBreak + openError.toString());
     return;
   }
   if (!opened) {
-    app.endUndoGroup();
-    alert("After Effects did not open the project:" + lineBreak + projectPath);
+    stop("Failed. After Effects did not open the project:" + lineBreak + projectPath);
     return;
   }
+
+  app.beginUndoGroup("Relink footage");
 
   var missing = [];
   var relinked = 0;
@@ -144,10 +163,22 @@ JSX = r"""(function () {
     }
   }
 
+  // Leave Anchor Point, Position, and Scale on influencer_alpha as they are
+  // in the template. The anchor sits on the top of the clip, so nudging the
+  // top scales the picture further inside the placement instead of sliding
+  // it out. Writing a center anchor here undoes that.
   app.project.save();
   app.endUndoGroup();
 
-  var message = "Saved " + personName + " (" + cardId + ").";
+  var dataMissing = false;
+  var dataIndex;
+  for (dataIndex = 0; dataIndex < missing.length; dataIndex++) {
+    if (String(missing[dataIndex]).toLowerCase().indexOf("data.json") !== -1) {
+      dataMissing = true;
+    }
+  }
+  var failed = relinked === 0 || dataMissing;
+  var message = (failed ? "Failed" : "Saved") + " " + personName + " (" + cardId + ").";
   if (relinked === 0 && missing.length === 0) {
     message += lineBreak + "No footage files were found in the project.";
   } else {
@@ -187,15 +218,7 @@ JSX = r"""(function () {
     alphaItem.openInViewer();
   }
 
-  var resultPath = projectFile.parent.fsName + "/ae-relink-result.txt";
-  var resultFile = new File(resultPath);
-  resultFile.encoding = "UTF-8";
-  if (resultFile.open("w")) {
-    resultFile.write(message);
-    resultFile.close();
-  }
-  message += lineBreak + lineBreak + "Result file:" + lineBreak + resultPath;
-  alert(message);
+  writeResult(message);
 })();
 """
 
@@ -313,9 +336,10 @@ def write_jsx(dest: str, project_path: str, footage: list, name: str, card_id: s
         .replace("__NAME__", json.dumps(name))
         .replace("__ID__", json.dumps(card_id))
         .replace("__ALPHA_PATH__", json.dumps(alpha_path))
+        .replace("__RESULT_PATH__", json.dumps(os.path.join(dest, "ae-relink-result.txt")))
     )
     jsx_path = os.path.join(dest, "ae-relink.jsx")
-    with open(jsx_path, "w", encoding="utf-8-sig") as jsx_file:
+    with open(jsx_path, "w", encoding="utf-8") as jsx_file:
         jsx_file.write(jsx)
     return jsx_path
 
@@ -620,6 +644,19 @@ def point_alpha_at(footage: list, template: str, dest: str, final_path: str) -> 
     )
 
 
+def next_job_folder(jobs_parent: str, folder_name: str) -> str:
+    """Pick a free folder. A repeat of the same name and id gets a number."""
+    dest = os.path.join(jobs_parent, folder_name)
+    if not os.path.lexists(dest):
+        return dest
+    for number in range(2, 100):
+        candidate = os.path.join(jobs_parent, folder_name + " " + str(number))
+        if not os.path.lexists(candidate):
+            print("That folder already exists. Using " + os.path.basename(candidate), flush=True)
+            return candidate
+    fail("Too many folders already use the name " + folder_name)
+
+
 def run(args: argparse.Namespace) -> None:
     name = clean_text(args.name, "Name")
     card_id = clean_text(args.id, "Id")
@@ -642,10 +679,8 @@ def run(args: argparse.Namespace) -> None:
         fail("ditto is not available. This workflow runs on macOS.")
 
     jobs_parent = ensure_jobs(args.jobs)
-    folder_name = "SS-" + folder_part(card_id, "Id") + "|" + folder_part(name, "Name")
-    dest = os.path.join(jobs_parent, folder_name)
-    if os.path.lexists(dest):
-        fail("Destination already exists: " + dest)
+    folder_name = "SS-" + folder_part(card_id, "Id") + " " + folder_part(name, "Name")
+    dest = next_job_folder(jobs_parent, folder_name)
     if is_inside(dest, template) or is_inside(template, dest) or dest == template:
         fail("Destination must be outside the template folder.")
 
@@ -667,6 +702,9 @@ def run(args: argparse.Namespace) -> None:
             "dataFile": data_path,
             "projectPath": project["newAbsolute"],
         }
+        kind = os.environ.get("FOIL_PACK_KIND", "").strip()
+        if kind in ("pack-face", "pack-face-2"):
+            report["kind"] = kind
         with open(os.path.join(dest, "ae-relink-report.json"), "w", encoding="utf-8") as report_file:
             json.dump(report, report_file, indent=2)
             report_file.write("\n")
@@ -678,11 +716,7 @@ def run(args: argparse.Namespace) -> None:
             remove_created(dest, template)
         raise
 
-    opened = subprocess.run(["open", "-a", "Adobe After Effects 2026", alpha_dest], check=False)
-    if opened.returncode != 0:
-        fail("After Effects could not open the Greenkey alpha file: " + alpha_dest)
     print("Destination: " + dest)
-    print("Opened in After Effects: " + alpha_dest)
     print("Alpha file: " + alpha_dest)
     print("Name: " + name)
     print("Id: " + card_id)
@@ -691,7 +725,60 @@ def run(args: argparse.Namespace) -> None:
     print("AE_JOB " + json.dumps({"destination": dest}, ensure_ascii=True))
 
 
+def post_progress(line: str) -> None:
+    """Send one runtime line to the operator page that is waiting on this run."""
+    url = os.environ.get("INFLUENCER_PROGRESS_URL", "").strip()
+    token = os.environ.get("INFLUENCER_PROGRESS_TOKEN", "").strip()
+    text = line.strip()
+    if not url or not text:
+        return
+    payload = json.dumps({"line": text}).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Progress-Token": token,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            response.read()
+    except Exception:
+        return
+
+
+class _ProgressStream:
+    def __init__(self, stream):
+        self.stream = stream
+        self.pending = ""
+
+    def write(self, text: str) -> int:
+        self.stream.write(text)
+        self.stream.flush()
+        self.pending += text
+        while "\n" in self.pending:
+            line, self.pending = self.pending.split("\n", 1)
+            post_progress(line)
+        return len(text)
+
+    def flush(self) -> None:
+        if self.pending:
+            post_progress(self.pending)
+            self.pending = ""
+        self.stream.flush()
+
+
+def install_progress_reports() -> None:
+    if not os.environ.get("INFLUENCER_PROGRESS_URL", "").strip():
+        return
+    sys.stdout = _ProgressStream(sys.stdout)
+    sys.stderr = _ProgressStream(sys.stderr)
+
+
 def main() -> None:
+    install_progress_reports()
     try:
         run(parse_args())
     except JobError as error:
