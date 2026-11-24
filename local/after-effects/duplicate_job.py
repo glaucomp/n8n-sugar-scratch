@@ -442,6 +442,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--id", required=True)
     parser.add_argument("--project", required=True)
     parser.add_argument("--clip", required=True)
+    parser.add_argument(
+        "--folder-base",
+        default="",
+        help="Optional initials-season base such as GP-SN. Creates GP-SN-1, GP-SN-2, …",
+    )
     return parser.parse_args()
 
 
@@ -747,6 +752,17 @@ def next_job_folder(jobs_parent: str, folder_name: str) -> str:
     fail("Too many folders already use the name " + folder_name)
 
 
+def next_numbered_folder(jobs_parent: str, folder_base: str) -> str:
+    """Pick GP-SN-1, then GP-SN-2, and so on for the same initials and season."""
+    for number in range(1, 100):
+        candidate = os.path.join(jobs_parent, folder_base + "-" + str(number))
+        if not os.path.lexists(candidate):
+            if number > 1:
+                print("That folder already exists. Using " + os.path.basename(candidate), flush=True)
+            return candidate
+    fail("Too many folders already use the name " + folder_base)
+
+
 def run(args: argparse.Namespace) -> None:
     name = clean_text(args.name, "Name")
     card_id = clean_text(args.id, "Id")
@@ -769,8 +785,12 @@ def run(args: argparse.Namespace) -> None:
         fail("ditto is not available. This workflow runs on macOS.")
 
     jobs_parent = ensure_jobs(args.jobs)
-    folder_name = "SS-" + folder_part(card_id, "Id") + "|" + folder_part(name, "Name")
-    dest = next_job_folder(jobs_parent, folder_name)
+    folder_base = (getattr(args, "folder_base", "") or "").strip()
+    if folder_base:
+        dest = next_numbered_folder(jobs_parent, folder_part(folder_base, "Folder base"))
+    else:
+        folder_name = "SS-" + folder_part(card_id, "Id") + "|" + folder_part(name, "Name")
+        dest = next_job_folder(jobs_parent, folder_name)
     if is_inside(dest, template) or is_inside(template, dest) or dest == template:
         fail("Destination must be outside the template folder.")
 
