@@ -826,11 +826,14 @@ def run(args: argparse.Namespace) -> None:
             remove_created(dest, template)
         raise
 
-    opened = subprocess.run(["open", "-a", "Adobe After Effects 2026", alpha_dest], check=False)
-    if opened.returncode != 0:
-        fail("After Effects could not open the Greenkey alpha file: " + alpha_dest)
+    if os.environ.get("AE_SKIP_ALPHA_OPEN", "").strip() == "1":
+        print("Leaving After Effects closed. The relink step opens the project.")
+    else:
+        opened = subprocess.run(["open", "-a", "Adobe After Effects 2026", alpha_dest], check=False)
+        if opened.returncode != 0:
+            fail("After Effects could not open the Greenkey alpha file: " + alpha_dest)
+        print("Opened in After Effects: " + alpha_dest)
     print("Destination: " + dest)
-    print("Opened in After Effects: " + alpha_dest)
     print("Alpha file: " + alpha_dest)
     print("Name: " + name)
     print("Id: " + card_id)
