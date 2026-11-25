@@ -402,7 +402,7 @@ def collect_files(template: str, dest: str, project_relative: str) -> tuple[dict
     return project, footage
 
 
-def edit_data(data_path: str, name: str, card_id: str) -> None:
+def edit_data(data_path: str, name: str, card_number: str) -> None:
     try:
         with open(data_path, encoding="utf-8") as data_file:
             data = json.load(data_file)
@@ -414,7 +414,8 @@ def edit_data(data_path: str, name: str, card_id: str) -> None:
     if "InfluencerName" not in text or "cardNumberText" not in text:
         fail("Data file is missing InfluencerName or cardNumberText: " + data_path)
     text["InfluencerName"] = name
-    text["cardNumberText"] = card_id
+    # Package code (PP-SM-5) or SS-{id} {name} — never the model id alone.
+    text["cardNumberText"] = card_number
     with open(data_path, "w", encoding="utf-8") as data_file:
         json.dump(data, data_file, indent=2, ensure_ascii=False)
         data_file.write("\n")
@@ -800,7 +801,9 @@ def run(args: argparse.Namespace) -> None:
         subprocess.run(["ditto", template, dest], check=True)
         copied = True
         data_path = os.path.join(dest, DATA_RELATIVE)
-        edit_data(data_path, name, card_id)
+        # Folder names may use "|" between id and name; the card shows a space.
+        card_number = os.path.basename(dest).replace("|", " ")
+        edit_data(data_path, name, card_number)
         alpha_dest = place_alpha(dest, alpha_path, owns_alpha)
         owns_alpha = False
         project, footage = collect_files(template, dest, project_name)
@@ -837,6 +840,7 @@ def run(args: argparse.Namespace) -> None:
     print("Alpha file: " + alpha_dest)
     print("Name: " + name)
     print("Id: " + card_id)
+    print("Card number: " + card_number)
     print("Data file: " + data_path)
     print("JSX: " + jsx_path)
     print("AE_JOB " + json.dumps({"destination": dest}, ensure_ascii=True))
