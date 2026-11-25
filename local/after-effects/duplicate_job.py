@@ -414,7 +414,7 @@ def edit_data(data_path: str, name: str, card_number: str) -> None:
     if "InfluencerName" not in text or "cardNumberText" not in text:
         fail("Data file is missing InfluencerName or cardNumberText: " + data_path)
     text["InfluencerName"] = name
-    # Package folder name (PP-SM-5 or SS-{id} {name}), not the model id.
+    # Package code (PP-SM-5) or SS-{id} {name} — never the model id alone.
     text["cardNumberText"] = card_number
     with open(data_path, "w", encoding="utf-8") as data_file:
         json.dump(data, data_file, indent=2, ensure_ascii=False)
@@ -801,7 +801,8 @@ def run(args: argparse.Namespace) -> None:
         subprocess.run(["ditto", template, dest], check=True)
         copied = True
         data_path = os.path.join(dest, DATA_RELATIVE)
-        card_number = os.path.basename(dest)
+        # Folder names may use "|" between id and name; the card shows a space.
+        card_number = os.path.basename(dest).replace("|", " ")
         edit_data(data_path, name, card_number)
         alpha_dest = place_alpha(dest, alpha_path, owns_alpha)
         owns_alpha = False
