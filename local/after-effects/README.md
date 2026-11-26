@@ -10,7 +10,7 @@ Import [duplicate-by-name.json](duplicate-by-name.json) again after this file ch
 
 The template folder is `/Users/glaucomp/Desktop/PackageMaker/ss-influencer`. Each run creates a new folder under `/Users/glaucomp/Desktop/PackageMaker/jobs`. The folder name is `SS-`, then the id, then `|`, then the name. Id `234` and name `Glauca` create `SS-234|Glauca`. The template folder stays unchanged.
 
-The copy stores the name in `InfluencerName` and the id in `cardNumberText` inside `(Footage)/influencer/data.json`. The workflow opens the Greenkey alpha movie in After Effects. After Effects then relinks footage to the copied files and reads that data file.
+With `folderBase` (for example `GP-SN`), the folder is `GP-SN-1`, `GP-SN-2`, and so on. The copy stores the name in `InfluencerName` and the folder name (the package code, such as `GP-SN-1`) in `cardNumberText` inside `(Footage)/influencer/data.json`. The workflow opens the Greenkey alpha movie in After Effects. After Effects then relinks footage to the copied files and reads that data file.
 
 Change the template path, the jobs path, or the project file name in the **Copy and edit** node when you use another template. Change the After Effects path in **Start After Effects** when you use another version.
 
